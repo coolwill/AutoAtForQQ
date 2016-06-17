@@ -14,8 +14,7 @@ namespace AutoAtForQQ
         static void Main()
         {
             string Current = Directory.GetCurrentDirectory();//获取当前根目录
-            Settings.self.Ini = new IniHelper(Current + "/config.ini");
-            Settings.self.load();
+            Settings.self.init(Current + "/config.ini");
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -27,74 +26,202 @@ namespace AutoAtForQQ
     {
         public static Settings self = new Settings();
 
-        private IniHelper ini;
+        public IniHelper ini;
+        public string iniFilePath;
 
-        private string title = "无标题 - 记事本";
-        private int prefix = 6;
-        private string slist = "";
-        private List<string> list = new List<string>(0);
+        public int prefix = 6;
+        public int count = 20;
+        public bool random = false;
+        public bool shuffle = false;
+        public bool autoSend = false;
 
-        public string Title
+        public List<Profile> profiles = new List<Profile>();
+
+        public Profile currentProfile;
+
+        public void init(string iniFilePath)
         {
-            get
-            {
-                return title;
-            }
+            this.iniFilePath = iniFilePath;
+            this.ini = new IniHelper(iniFilePath);
 
-            set
-            {
-                title = value;
-            }
+            Settings.self.load();
         }
 
-        public int Prefix
+        public Profile selectProfile(int index)
         {
-            get
-            {
-                return prefix;
-            }
-
-            set
-            {
-                prefix = value;
-            }
+            currentProfile = profiles[index];
+            return currentProfile;
         }
 
-        public string Slist
+        public Profile addProfile()
         {
-            get
-            {
-                return slist;
-            }
-
-            set
-            {
-                slist = value;
-            }
+            Profile profile = new Profile(profiles.Count + "-" + new Random().Next(100, 999));
+            profiles.Add(profile);
+            return selectProfile(profiles.Count - 1);
         }
 
-        public IniHelper Ini
+        public Profile removeProfile()
         {
-            get
+            profiles.Remove(currentProfile);
+            if (profiles.Count == 0)
             {
-                return ini;
+                return addProfile();
             }
-
-            set
-            {
-                ini = value;
-            }
+            return selectProfile(0);
         }
 
-        public void parseList(string slist)
+        public void load()
         {
-            this.slist = slist;
+            try
+            {
+                prefix = Int32.Parse(ini.ReadValue("Main", "prefix"));
+            }
+            catch (Exception)
+            {
+                prefix = 6;
+            }
+
+            try
+            {
+                count = Int32.Parse(ini.ReadValue("Main", "count"));
+            }
+            catch (Exception)
+            {
+                count = 20;
+            }
+
+            try
+            {
+                random = Boolean.Parse(ini.ReadValue("Main", "random"));
+            }
+            catch (Exception)
+            {
+                random = false;
+            }
+
+            try
+            {
+                autoSend = Boolean.Parse(ini.ReadValue("Main", "autoSend"));
+            }
+            catch (Exception)
+            {
+                autoSend = false;
+            }
+
+            try
+            {
+                shuffle = Boolean.Parse(ini.ReadValue("Main", "shuffle"));
+            }
+            catch (Exception)
+            {
+                shuffle = false;
+            }
+
+            string profiles_str = ini.ReadValue("Main", "profiles");
+            string[] profileNames = profiles_str.Split(',');
+            foreach (string profileName in profileNames)
+            {
+                if (profileName.Trim().Length == 0)
+                {
+                    continue;
+                }
+
+                Profile profile = new Profile(profileName);
+                profile.load(ini);
+                profiles.Add(profile);
+            }
+
+            if (profiles.Count == 0)
+            {
+                addProfile();
+            }
+            else
+            {
+                selectProfile(0);
+            }
+
+        }
+
+        public void save()
+        {
+            File.Delete(iniFilePath);
+
+            ini.WriteValue("Main", "prefix", prefix + "");
+            ini.WriteValue("Main", "random", random + "");
+            ini.WriteValue("Main", "count", count + "");
+            ini.WriteValue("Main", "autoSend", autoSend + "");
+            ini.WriteValue("Main", "shuffle", shuffle + "");
+
+            string profiles_str = "";
+
+            foreach (Profile profile in profiles)
+            {
+                profiles_str += profile.name + ",";
+                profile.save(ini);
+            }
+
+            profiles_str = profiles_str.Remove(profiles_str.Length - 1);
+            ini.WriteValue("Main", "profiles", profiles_str);
+        }
+    }
+
+    public class Profile
+    {
+        public string name = "";
+        public string title = "无标题 - 记事本";
+        public string slist = "";
+        List<string> list = new List<string>();
+
+        public Profile(string name)
+        {
+            this.name = name;
+        }
+
+        public string getDisplayName()
+        {
+            return "(" + list.Count + ")" + title;
+        }
+
+        public void load(IniHelper ini)
+        {
+            this.title = ini.ReadValue(name, "title");
+
+            int i = 0;
+            string str = "";
+            string s = ini.ReadValue(name, "list" + i++);
+            while (s.Length > 0)
+            {
+                str += s;
+                s = ini.ReadValue(name, "list" + i++);
+            }
+
+            slist = str.Replace(",", "\r\n");
+
+            parseList();
+        }
+
+        public void save(IniHelper ini)
+        {
+            ini.WriteValue(name, "title", title);
+
+            string str = slist.Replace("\r\n", ",");
+            int i = 0;
+            while (str.Length > 254)
+            {
+                ini.WriteValue(name, "list" + i++, str.Substring(0, 254));
+                str = str.Substring(254);
+            }
+            ini.WriteValue(name, "list" + i++, str);
+        }
+
+        public void parseList()
+        {
             string[] arr = slist.Split('\n');
             List<string> list = new List<string>(arr.Length);
             foreach (string s in arr)
             {
                 string ss = s.Trim();
-                if(ss.Length > 0)
+                if (ss.Length > 0)
                 {
                     list.Add(ss);
                 }
@@ -102,13 +229,13 @@ namespace AutoAtForQQ
             this.list = list;
         }
 
-        public List<List<string>> getItems(int count, bool random)
+        public List<List<string>> getItems(int count, bool random, bool shuffle)
         {
-            if(count == 0)
+            if (count == 0)
             {
                 count = list.Count;
             }
-            else if(count > list.Count)
+            else if (count > list.Count)
             {
                 count = list.Count;
             }
@@ -118,9 +245,25 @@ namespace AutoAtForQQ
                 return new List<List<string>>(0);
             }
 
-            List<string> source = new List<string>(list);
+            List<string> source = new List<string>();
+            if (Settings.self.random)
+            {
+                Random r = new Random();
+                for (int i = 0; i < count; i++)
+                {
+                    source.Add(list[r.Next(list.Count)]);
+                }
 
-            if (random)
+            }
+            else
+            {
+                for (int i = 0; i < count; i++)
+                {
+                    source.Add(list[i]);
+                }
+            }
+
+            if (Settings.self.shuffle)
             {
                 source = GetRandomList(source);
             }
@@ -131,29 +274,18 @@ namespace AutoAtForQQ
             {
                 if (i % 20 == 0)
                 {
-                    if(i != 0)
+                    if (i != 0)
                     {
                         target.Add(temlist);
                     }
-                    temlist = new List<string>(30);
+                    temlist = new List<string>();
                 }
 
-                temlist.Add(source[i].Substring(0, prefix));
+                temlist.Add(source[i].Substring(0, Settings.self.prefix));
             }
             target.Add(temlist);
 
             return target;
-        }
-
-        public List<T> RandomSortList<T>(List<T> ListT)
-        {
-            Random random = new Random();
-            List<T> newList = new List<T>();
-            foreach (T item in ListT)
-            {
-                newList.Insert(random.Next(newList.Count + 1), item);
-            }
-            return newList;
         }
 
         public static List<T> GetRandomList<T>(List<T> inputList)
@@ -182,50 +314,10 @@ namespace AutoAtForQQ
             }
             return outputList;
         }
-
-        public void save()
-        {
-            ini.WriteValue("Main", "title", title);
-            ini.WriteValue("Main", "prefix", prefix + "");
-
-            string str = slist.Replace("\r\n", ",");
-            int i = 0;
-            while(str.Length > 254)
-            {
-                ini.WriteValue("Main", "list" + i++, str.Substring(0, 254));
-                str = str.Substring(254);
-            }
-            ini.WriteValue("Main", "list" + i++, str);
-        }
-
-        public void load()
-        {
-            title = ini.ReadValue("Main", "title");
-            if (title.Length == 0)
-            {
-                title = "无标题 - 记事本";
-            }
-
-            try {
-                prefix = Int32.Parse(ini.ReadValue("Main", "prefix"));
-            }
-            catch (Exception)
-            {
-                prefix = 6;
-            }
-
-            int i = 0;
-            string str = "";
-            string s = ini.ReadValue("Main", "list" + i++);
-            while (s.Length > 0)
-            {
-                str += s;
-                s = ini.ReadValue("Main", "list" + i++);
-            }
-
-            slist = str.Replace(",", "\r\n");
-        }
     }
+
+
+
 
     public class IniHelper
     {
